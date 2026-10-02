@@ -236,40 +236,114 @@ if (-not (Test-Path $saveLevelRoot)) {
 Write-Step "Scanning save folders in:"
 Write-Info $saveLevelRoot
 
-$saveFolders = Get-ChildItem -Path $saveLevelRoot -Directory | Sort-Object Name
+# ── Build save info list ──────────────────────────────────────────────────────
 
-if ($saveFolders.Count -eq 0) {
+$saveInfoList = @()
+
+foreach ($saveDir in (Get-ChildItem -Path $saveLevelRoot -Directory)) {
+    $saveId      = $saveDir.Name
+    $gilFile     = Join-Path $saveDir.FullName "$saveId.gil"
+    $nameFile    = Join-Path $saveDir.FullName "name.json"
+
+    # Last-modified from the .gil file (fallback to folder time)
+    $lastModified = $null
+    if (Test-Path $gilFile) {
+        $lastModified = (Get-Item $gilFile).LastWriteTime
+    } else {
+        $lastModified = $saveDir.LastWriteTime
+    }
+
+    # Friendly name from name.json (if present)
+    $friendlyName = $null
+    if (Test-Path $nameFile) {
+        try {
+            $nameObj      = Get-Content $nameFile -Raw | ConvertFrom-Json
+            $friendlyName = $nameObj.name
+        } catch {
+            $friendlyName = $null
+        }
+    }
+
+    $saveInfoList += [PSCustomObject]@{
+        Dir           = $saveDir
+        SaveId        = $saveId
+        LastModified  = $lastModified
+        FriendlyName  = $friendlyName
+        HasName       = (Test-Path $nameFile)
+    }
+}
+
+# Sort descending by last-modified date
+$saveInfoList = $saveInfoList | Sort-Object LastModified -Descending
+
+if ($saveInfoList.Count -eq 0) {
     Write-Warn "No save folders found. Please create a save in-game first."
     Pause-ForUser
     exit 1
 }
 
+# ── Display save list ─────────────────────────────────────────────────────────
+
 Write-Host ""
-Write-Host "  Available save folders:" -ForegroundColor White
+Write-Host "  Available save folders (newest first):" -ForegroundColor White
 Write-Host ""
 
-for ($i = 0; $i -lt $saveFolders.Count; $i++) {
-    $saveDir    = $saveFolders[$i]
+for ($i = 0; $i -lt $saveInfoList.Count; $i++) {
+    $info       = $saveInfoList[$i]
+    $saveDir    = $info.Dir
     $luaPath    = Join-Path $saveDir.FullName "external_lua_file"
     $hasLua     = Test-Path $luaPath
     $luaStatus  = if ($hasLua) { "[Lua OK]" } else { "[No Lua]" }
     $luaColor   = if ($hasLua) { "Green"    } else { "DarkGray" }
 
-    Write-Host ("  [{0}] {1}  " -f ($i + 1), $saveDir.Name) -NoNewline -ForegroundColor Cyan
+    # Friendly name or placeholder
+    $nameLabel  = if ($info.FriendlyName) { "`"$($info.FriendlyName)`"" } else { "(no name)" }
+    $nameColor  = if ($info.FriendlyName) { "White"   } else { "DarkGray" }
+
+    # Date string
+    $dateStr    = $info.LastModified.ToString("yyyy-MM-dd HH:mm:ss")
+
+    Write-Host ("  [{0}] " -f ($i + 1)) -NoNewline -ForegroundColor Cyan
+    Write-Host ("{0,-36}  " -f $info.SaveId) -NoNewline -ForegroundColor Cyan
+    Write-Host ("{0,-24}  " -f $nameLabel) -NoNewline -ForegroundColor $nameColor
+    Write-Host ("{0}  " -f $dateStr) -NoNewline -ForegroundColor DarkGray
     Write-Host $luaStatus -ForegroundColor $luaColor
 }
 
 Write-Host ""
 
 do {
-    $raw = Read-Host "  Enter number (1-$($saveFolders.Count))"
+    $raw = Read-Host "  Enter number (1-$($saveInfoList.Count))"
     $choice = $raw -as [int]
-} while (-not $choice -or $choice -lt 1 -or $choice -gt $saveFolders.Count)
+} while (-not $choice -or $choice -lt 1 -or $choice -gt $saveInfoList.Count)
 
-$selectedSave   = $saveFolders[$choice - 1]
-$luaFolder      = Join-Path $selectedSave.FullName "external_lua_file"
+$selectedInfo = $saveInfoList[$choice - 1]
+$selectedSave = $selectedInfo.Dir
+$luaFolder    = Join-Path $selectedSave.FullName "external_lua_file"
 
 Write-OK "Selected save: $($selectedSave.Name)"
+
+# ── Prompt for name.json if missing ──────────────────────────────────────────
+
+if (-not $selectedInfo.HasName) {
+    Write-Host ""
+    Write-Warn "This save does not have a name.json identifier file."
+    Write-Host ""
+    Write-Host "  It's recommended to save your save name the same as the name" -ForegroundColor Yellow
+    Write-Host "  you set in Miliastra Editor Save Management." -ForegroundColor Yellow
+    Write-Host ""
+    $saveName = Read-Host "  Enter a name for this save (leave blank to skip)"
+
+    if ($saveName -and $saveName.Trim() -ne "") {
+        $nameJson = [PSCustomObject]@{ name = $saveName.Trim() } | ConvertTo-Json -Compress
+        $nameFilePath = Join-Path $selectedSave.FullName "name.json"
+        $nameJson | Set-Content -Path $nameFilePath -Encoding UTF8
+        Write-OK "name.json created: $nameFilePath"
+        $selectedInfo.FriendlyName = $saveName.Trim()
+    } else {
+        Write-Info "Skipped — no name.json created."
+    }
+}
 
 # Create external_lua_file folder if it doesn't exist yet
 if (-not (Test-Path $luaFolder)) {
@@ -293,7 +367,11 @@ if (-not (Test-Path $vscodeDir)) {
 
 # ── settings.json ─────────────────────────────────────────────────────────────
 
-$settingsJson = @"
+$settingsPath = Join-Path $vscodeDir "settings.json"
+if (Test-Path $settingsPath) {
+    Write-OK "Skipped: .vscode\settings.json already exists."
+} else {
+    $settingsJson = @"
 {
     "Lua.runtime.version": "Lua 5.4",
     "Lua.workspace.library": [],
@@ -324,14 +402,17 @@ $settingsJson = @"
     }
 }
 "@
-
-$settingsPath = Join-Path $vscodeDir "settings.json"
-$settingsJson | Set-Content -Path $settingsPath -Encoding UTF8
-Write-OK "Written: .vscode\settings.json"
+    $settingsJson | Set-Content -Path $settingsPath -Encoding UTF8
+    Write-OK "Written: .vscode\settings.json"
+}
 
 # ── extensions.json (workspace recommendations) ───────────────────────────────
 
-$extensionsJson = @"
+$extensionsPath = Join-Path $vscodeDir "extensions.json"
+if (Test-Path $extensionsPath) {
+    Write-OK "Skipped: .vscode\extensions.json already exists."
+} else {
+    $extensionsJson = @"
 {
     "recommendations": [
         "sumneko.lua",
@@ -339,10 +420,9 @@ $extensionsJson = @"
     ]
 }
 "@
-
-$extensionsPath = Join-Path $vscodeDir "extensions.json"
-$extensionsJson | Set-Content -Path $extensionsPath -Encoding UTF8
-Write-OK "Written: .vscode\extensions.json"
+    $extensionsJson | Set-Content -Path $extensionsPath -Encoding UTF8
+    Write-OK "Written: .vscode\extensions.json"
+}
 
 # =============================================================================
 #  STEP 6 — Open Folder in VS Code
@@ -373,6 +453,7 @@ Write-Host "  Setup complete! Happy scripting, Craftperson!" -ForegroundColor Wh
 Write-Host ""
 Write-Host "  Folder  : $luaFolder" -ForegroundColor Gray
 Write-Host "  UID     : $($selectedUID.Name)" -ForegroundColor Gray
-Write-Host "  Save    : $($selectedSave.Name)" -ForegroundColor Gray
+$saveSummary = if ($selectedInfo.FriendlyName) { "$($selectedSave.Name)  (`"$($selectedInfo.FriendlyName)`")" } else { $selectedSave.Name }
+Write-Host "  Save    : $saveSummary" -ForegroundColor Gray
 Write-Host ("=" * 60) -ForegroundColor Cyan
 Write-Host ""
