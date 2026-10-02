@@ -329,8 +329,12 @@ if (-not $selectedInfo.HasName) {
     Write-Host ""
     Write-Warn "This save does not have a name.json identifier file."
     Write-Host ""
+    Write-Host " To ensure proper recognition when rerunning the setup script, it's recommended to name your save."
+    Write-Host ""
     Write-Host "  It's recommended to save your save name the same as the name" -ForegroundColor Yellow
     Write-Host "  you set in Miliastra Editor Save Management." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host " To avoid messing with your save file, we cannot access your save file to get the save file name."
     Write-Host ""
     $saveName = Read-Host "  Enter a name for this save (leave blank to skip)"
 
