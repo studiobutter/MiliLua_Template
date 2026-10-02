@@ -331,7 +331,7 @@ if (-not $selectedInfo.HasName) {
     Write-Host ""
     Write-Host " To ensure proper recognition when rerunning the setup script, it's recommended to name your save."
     Write-Host ""
-    Write-Host "  It's recommended to save your save name the same as the name" -ForegroundColor Yellow
+    Write-Host "  It's recommended to name your save name the same as the name" -ForegroundColor Yellow
     Write-Host "  you set in Miliastra Editor Save Management." -ForegroundColor Yellow
     Write-Host ""
     Write-Host " To avoid messing with your save file, we cannot access your save file to get the save file name."
@@ -453,7 +453,7 @@ try {
 
 Write-Host ""
 Write-Host ("=" * 60) -ForegroundColor Cyan
-Write-Host "  Setup complete! Happy scripting, Craftperson!" -ForegroundColor White
+Write-Host "  Opening... Happy scripting, Craftperson!" -ForegroundColor White
 Write-Host ""
 Write-Host "  Folder  : $luaFolder" -ForegroundColor Gray
 Write-Host "  UID     : $($selectedUID.Name)" -ForegroundColor Gray
